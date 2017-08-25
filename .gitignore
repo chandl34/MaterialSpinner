@@ -1,0 +1,14 @@
+### iOS ###
+build/
+xcuserdata/
+Pods/
+Podfile.lock
+
+
+### Android ###
+bin/
+.gradle/
+.idea/
+*.iml
+*.apk
+local.properties
