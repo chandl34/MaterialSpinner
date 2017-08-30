@@ -1,19 +1,26 @@
 package fr.ganfra.materialspinner;
 
+
 import android.content.Context;
+import android.content.res.Resources;
 import android.content.res.TypedArray;
+import android.database.DataSetObserver;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.Point;
 import android.graphics.Typeface;
 import android.os.Build;
+import android.support.annotation.Nullable;
 import android.support.v7.widget.AppCompatSpinner;
+import android.support.v7.widget.ListPopupWindow;
+import android.support.v7.widget.ThemedSpinnerAdapter;
 import android.text.Layout;
 import android.text.StaticLayout;
 import android.text.TextPaint;
 import android.util.AttributeSet;
 import android.util.DisplayMetrics;
+import android.util.SparseBooleanArray;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -22,11 +29,18 @@ import android.view.ViewGroup;
 import android.view.animation.LinearInterpolator;
 import android.widget.AdapterView;
 import android.widget.BaseAdapter;
+import android.widget.ListAdapter;
+import android.widget.ListView;
+import android.widget.PopupWindow;
 import android.widget.SpinnerAdapter;
 import android.widget.TextView;
 
 import com.nineoldandroids.animation.ObjectAnimator;
 import com.nineoldandroids.animation.ValueAnimator;
+
+import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 
 
 public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.AnimatorUpdateListener {
@@ -109,6 +123,28 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
     private Integer mDropDownHintView;
     private Integer mHintView;
 
+    private SortedSet<Integer> mMultipleChoiceSelectionSet;
+    private MultipleChoiceDropDown mMultipleChoiceDropDown;
+    private OnItemsSelectedListener mOnItemsSelectedListener;
+
+
+    /*
+    * **********************************************************************************
+    * INTERFACES
+    * **********************************************************************************
+    */
+
+    public interface OnItemsSelectedListener
+    {
+        void onItemsSelected(SortedSet<Integer> selectionSet);
+    }
+
+    public interface MultipleChoiceAdapter extends SpinnerAdapter
+    {
+        View getMultipleChoiceSelectionsView(Set<Integer> selectionSet, View convertView, ViewGroup parent);
+    }
+
+
     /*
     * **********************************************************************************
     * CONSTRUCTORS
@@ -185,6 +221,8 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
         mHintView = array.getResourceId(R.styleable.MaterialSpinner_ms_hintView, android.R.layout.simple_spinner_item);
         mDropDownHintView = array.getResourceId(R.styleable.MaterialSpinner_ms_dropDownHintView, android.R.layout.simple_spinner_dropdown_item);
 
+        mMultipleChoiceDropDown = new MultipleChoiceDropDown(context, attrs);
+
         String typefacePath = array.getString(R.styleable.MaterialSpinner_ms_typeface);
         if (typefacePath != null) {
             typeface = Typeface.createFromAsset(getContext().getAssets(), typefacePath);
@@ -210,6 +248,26 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
                 MaterialSpinner.super.setSelection(position);
             }
         });
+    }
+
+    public void setSelections(SortedSet<Integer> selectionSet)
+    {
+        mMultipleChoiceSelectionSet = selectionSet;
+
+        // Hack to force spinner to update
+        if(selectionSet == null || selectionSet.isEmpty())
+        {
+            MaterialSpinner.this.setSelection(0);
+        }
+        else
+        {
+            int position = 1;
+            if(position == MaterialSpinner.this.getSelectedItemPosition())
+            {
+                ++position;
+            }
+            MaterialSpinner.this.setSelection(position);
+        }
     }
 
     private void initPaintObjects() {
@@ -451,10 +509,10 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
             }
             String textToDraw = floatingLabelText != null ? floatingLabelText.toString() : hint.toString();
             if (isRtl) {
-				canvas.drawText(textToDraw, getWidth() - rightLeftSpinnerPadding - textPaint.measureText(textToDraw), startYFloatingLabel, textPaint);
-			} else {
-				canvas.drawText(textToDraw, startX + rightLeftSpinnerPadding, startYFloatingLabel, textPaint);
-			}
+                canvas.drawText(textToDraw, getWidth() - rightLeftSpinnerPadding - textPaint.measureText(textToDraw), startYFloatingLabel, textPaint);
+            } else {
+                canvas.drawText(textToDraw, startX + rightLeftSpinnerPadding, startYFloatingLabel, textPaint);
+            }
         }
 
         drawSelector(canvas, getWidth() - rightLeftSpinnerPadding, getPaddingTop() + dpToPx(8));
@@ -490,6 +548,22 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
      * LISTENER METHODS
      * **********************************************************************************
     */
+
+    @Override
+    public boolean performClick()
+    {
+        if(isMultipleChoice())
+        {
+            if(!mMultipleChoiceDropDown.isShowing())
+            {
+                mMultipleChoiceDropDown.show();
+            }
+
+            return true;
+        }
+
+        return super.performClick();
+    }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
@@ -544,6 +618,11 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
         };
 
         super.setOnItemSelectedListener(onItemSelectedListener);
+    }
+
+    public void setOnItemsSelectedListener(OnItemsSelectedListener listener)
+    {
+        mOnItemsSelectedListener = listener;
     }
 
     @Override
@@ -780,13 +859,18 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
     }
 
     public void setRtl() {
-		isRtl = true;
-		invalidate();
-	}
+        isRtl = true;
+        invalidate();
+    }
 
-	public boolean isRtl() {
-		return isRtl;
-	}
+    public boolean isRtl() {
+        return isRtl;
+    }
+
+    public boolean isMultipleChoice()
+    {
+        return hintAdapter != null && hintAdapter.getWrappedAdapter() instanceof MultipleChoiceAdapter;
+    }
 
     /**
      * @deprecated {use @link #setPaddingSafe(int, int, int, int)} to keep internal computation OK
@@ -815,6 +899,12 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
     @Override
     public void setAdapter(SpinnerAdapter adapter) {
         hintAdapter = new HintAdapter(adapter, getContext());
+
+        if(adapter instanceof MultipleChoiceAdapter)
+        {
+            mMultipleChoiceDropDown.setAdapter(new DropDownAdapter(adapter, getPopupContext().getTheme()));
+        }
+
         super.setAdapter(hintAdapter);
     }
 
@@ -882,7 +972,6 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
             mContext = context;
         }
 
-
         @Override
         public int getViewTypeCount() {
             //Workaround waiting for a Google correction (https://code.google.com/p/android/issues/detail?id=79011)
@@ -931,12 +1020,27 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
             if (getItemViewType(position) == HINT_TYPE) {
                 return getHintView(convertView, parent, isDropDownView);
             }
+
             //workaround to have multiple types in spinner
             if (convertView != null) {
-                convertView = (convertView.getTag() != null && convertView.getTag() instanceof Integer && (Integer) convertView.getTag() != HINT_TYPE) ? convertView : null;
+                convertView = (convertView.getTag() instanceof Integer && (Integer) convertView.getTag() != HINT_TYPE) ?
+                              convertView :
+                              null;
             }
+
+            if(!isDropDownView && mSpinnerAdapter instanceof MultipleChoiceAdapter)
+            {
+                if(mMultipleChoiceSelectionSet != null && !mMultipleChoiceSelectionSet.isEmpty())
+                {
+                    MultipleChoiceAdapter adapter = (MultipleChoiceAdapter)mSpinnerAdapter;
+                    return adapter.getMultipleChoiceSelectionsView(mMultipleChoiceSelectionSet, convertView, parent);
+                }
+            }
+
             position = hint != null ? position - 1 : position;
-            return isDropDownView ? mSpinnerAdapter.getDropDownView(position, convertView, parent) : mSpinnerAdapter.getView(position, convertView, parent);
+            return isDropDownView ?
+                   mSpinnerAdapter.getDropDownView(position, convertView, parent) :
+                   mSpinnerAdapter.getView(position, convertView, parent);
         }
 
         private View getHintView(final View convertView, final ViewGroup parent, final boolean isDropDownView) {
@@ -954,6 +1058,171 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
 
         private SpinnerAdapter getWrappedAdapter() {
             return mSpinnerAdapter;
+        }
+    }
+
+    private static class DropDownAdapter implements ListAdapter, SpinnerAdapter {
+
+        private SpinnerAdapter mAdapter;
+
+        private ListAdapter mListAdapter;
+
+        /**
+         * Creates a new ListAdapter wrapper for the specified adapter.
+         *
+         * @param adapter       the SpinnerAdapter to transform into a ListAdapter
+         * @param dropDownTheme the theme against which to inflate drop-down
+         *                      views, may be {@null} to use default theme
+         */
+        public DropDownAdapter(@Nullable SpinnerAdapter adapter,
+                               @Nullable Resources.Theme dropDownTheme) {
+            mAdapter = adapter;
+
+            if (adapter instanceof ListAdapter) {
+                mListAdapter = (ListAdapter) adapter;
+            }
+
+            if (dropDownTheme != null) {
+                if (Build.VERSION.SDK_INT >= 23
+                    && adapter instanceof android.widget.ThemedSpinnerAdapter) {
+                    final android.widget.ThemedSpinnerAdapter themedAdapter =
+                    (android.widget.ThemedSpinnerAdapter) adapter;
+                    if (themedAdapter.getDropDownViewTheme() != dropDownTheme) {
+                        themedAdapter.setDropDownViewTheme(dropDownTheme);
+                    }
+                } else if (adapter instanceof ThemedSpinnerAdapter) {
+                    final ThemedSpinnerAdapter themedAdapter = (ThemedSpinnerAdapter) adapter;
+                    if (themedAdapter.getDropDownViewTheme() == null) {
+                        themedAdapter.setDropDownViewTheme(dropDownTheme);
+                    }
+                }
+            }
+        }
+
+        public int getCount() {
+            return mAdapter == null ? 0 : mAdapter.getCount();
+        }
+
+        public Object getItem(int position) {
+            return mAdapter == null ? null : mAdapter.getItem(position);
+        }
+
+        public long getItemId(int position) {
+            return mAdapter == null ? -1 : mAdapter.getItemId(position);
+        }
+
+        public View getView(int position, View convertView, ViewGroup parent) {
+            return getDropDownView(position, convertView, parent);
+        }
+
+        public View getDropDownView(int position, View convertView, ViewGroup parent) {
+            return (mAdapter == null) ? null
+                                      : mAdapter.getDropDownView(position, convertView, parent);
+        }
+
+        public boolean hasStableIds() {
+            return mAdapter != null && mAdapter.hasStableIds();
+        }
+
+        public void registerDataSetObserver(DataSetObserver observer) {
+            if (mAdapter != null) {
+                mAdapter.registerDataSetObserver(observer);
+            }
+        }
+
+        public void unregisterDataSetObserver(DataSetObserver observer) {
+            if (mAdapter != null) {
+                mAdapter.unregisterDataSetObserver(observer);
+            }
+        }
+
+        /**
+         * If the wrapped SpinnerAdapter is also a ListAdapter, delegate this call.
+         * Otherwise, return true.
+         */
+        public boolean areAllItemsEnabled() {
+            final ListAdapter adapter = mListAdapter;
+            if (adapter != null) {
+                return adapter.areAllItemsEnabled();
+            } else {
+                return true;
+            }
+        }
+
+        /**
+         * If the wrapped SpinnerAdapter is also a ListAdapter, delegate this call.
+         * Otherwise, return true.
+         */
+        public boolean isEnabled(int position) {
+            final ListAdapter adapter = mListAdapter;
+            if (adapter != null) {
+                return adapter.isEnabled(position);
+            } else {
+                return true;
+            }
+        }
+
+        public int getItemViewType(int position) {
+            return 0;
+        }
+
+        public int getViewTypeCount() {
+            return 1;
+        }
+
+        public boolean isEmpty() {
+            return getCount() == 0;
+        }
+    }
+
+    private class MultipleChoiceDropDown extends ListPopupWindow implements PopupWindow.OnDismissListener {
+
+        public MultipleChoiceDropDown(Context context, AttributeSet attrs) {
+            super(context, attrs);
+
+            setAnchorView(MaterialSpinner.this);
+            setModal(true);
+            setPromptPosition(POSITION_PROMPT_ABOVE);
+
+            setOnDismissListener(this);
+        }
+
+        @Override
+        public void show()
+        {
+            super.show();
+
+            final ListView listView = getListView();
+            listView.setChoiceMode(ListView.CHOICE_MODE_MULTIPLE);
+
+            if(mMultipleChoiceSelectionSet != null)
+            {
+                for(int position : mMultipleChoiceSelectionSet)
+                {
+                    listView.setItemChecked(position, true);
+                }
+            }
+        }
+
+        @Override
+        public void onDismiss()
+        {
+            if(mOnItemsSelectedListener != null)
+            {
+                SortedSet<Integer> selectionSet = new TreeSet<>();
+                SparseBooleanArray list = getListView().getCheckedItemPositions();
+                for(int i = 0; i < list.size(); ++i)
+                {
+                    int position = list.keyAt(i);
+                    if(list.get(position))
+                    {
+                        selectionSet.add(position);
+                    }
+                }
+                setSelections(selectionSet);
+
+                mOnItemsSelectedListener.onItemsSelected(selectionSet);
+            }
         }
     }
 }
