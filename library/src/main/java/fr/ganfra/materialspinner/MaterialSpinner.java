@@ -509,10 +509,10 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
             }
             String textToDraw = floatingLabelText != null ? floatingLabelText.toString() : hint.toString();
             if (isRtl) {
-                canvas.drawText(textToDraw, getWidth() - rightLeftSpinnerPadding - textPaint.measureText(textToDraw), startYFloatingLabel, textPaint);
-            } else {
-                canvas.drawText(textToDraw, startX + rightLeftSpinnerPadding, startYFloatingLabel, textPaint);
-            }
+				canvas.drawText(textToDraw, getWidth() - rightLeftSpinnerPadding - textPaint.measureText(textToDraw), startYFloatingLabel, textPaint);
+			} else {
+				canvas.drawText(textToDraw, startX + rightLeftSpinnerPadding, startYFloatingLabel, textPaint);
+			}
         }
 
         drawSelector(canvas, getWidth() - rightLeftSpinnerPadding, getPaddingTop() + dpToPx(8));
@@ -591,10 +591,20 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
 
                 if (hint != null || floatingLabelText != null) {
-                    if (!floatingLabelVisible && position != 0) {
-                        showFloatingLabel();
-                    } else if (floatingLabelVisible && (position == 0 && !alwaysShowFloatingLabel)) {
-                        hideFloatingLabel();
+                    boolean hasValue = position > 0 || hint == null;
+                    if(hasValue || alwaysShowFloatingLabel)
+                    {
+                        if(!floatingLabelVisible)
+                        {
+                            showFloatingLabel();
+                        }
+                    }
+                    else
+                    {
+                        if(floatingLabelVisible)
+                        {
+                            hideFloatingLabel();
+                        }
                     }
                 }
 
@@ -859,13 +869,13 @@ public class MaterialSpinner extends AppCompatSpinner implements ValueAnimator.A
     }
 
     public void setRtl() {
-        isRtl = true;
-        invalidate();
-    }
+		isRtl = true;
+		invalidate();
+	}
 
-    public boolean isRtl() {
-        return isRtl;
-    }
+	public boolean isRtl() {
+		return isRtl;
+	}
 
     public boolean isMultipleChoice()
     {
